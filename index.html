@@ -388,6 +388,122 @@ body {
 
 /* Hidden */
 .hidden { display: none !important; }
+
+/* Gym tracker */
+.gym-week-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.gym-week-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--text2);
+  font-weight: 600;
+}
+.gym-nav-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  transition: all 0.2s;
+}
+.gym-nav-btn:active { transform: scale(0.93); background: var(--surface2); }
+.gym-grid { display: flex; flex-direction: column; gap: 10px; }
+.gym-day-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  transition: all 0.18s;
+}
+.gym-day-card:active { transform: scale(0.98); }
+.gym-day-card.went { border-left-color: var(--accent); }
+.gym-day-card.missed { border-left-color: var(--red); opacity: 0.7; }
+.gym-day-card.future { opacity: 0.35; pointer-events: none; cursor: default; }
+.gym-day-card.today { background: var(--surface2); }
+.gym-day-info { display: flex; flex-direction: column; gap: 2px; }
+.gym-day-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+.gym-day-date {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text2);
+}
+.gym-day-status { display: flex; align-items: center; gap: 8px; }
+.gym-type-badge {
+  background: rgba(74,222,128,0.15);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 100px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.gym-missed-badge {
+  background: rgba(248,113,113,0.12);
+  color: var(--red);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 100px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.gym-unchecked {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gym-modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.gym-modal-sub {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text2);
+  margin-bottom: 16px;
+}
+.gym-type-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.gym-type-btn {
+  padding: 14px 8px;
+  border-radius: 12px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+.gym-type-btn:active { transform: scale(0.96); background: var(--accent); color: var(--bg); border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -423,6 +539,9 @@ body {
 <!-- HISTORY VIEW -->
 <div id="historyView" class="hidden"></div>
 
+<!-- GYM VIEW -->
+<div id="gymView" class="hidden"></div>
+
 <!-- SETTINGS MODAL -->
 <div class="modal-overlay" id="settingsModal">
   <div class="modal">
@@ -435,6 +554,21 @@ body {
     <button class="modal-btn" onclick="openEditConfig()">✏️ Edit Exercises</button>
     <button class="modal-btn danger" onclick="confirmClear()">🗑 Clear All Data</button>
     <button class="modal-btn" onclick="closeSettings()" style="margin-top:8px;">Close</button>
+  </div>
+</div>
+
+<!-- GYM DAY MODAL -->
+<div class="modal-overlay" id="gymDayModal">
+  <div class="modal">
+    <div class="gym-modal-title">Did you go to the gym?</div>
+    <div class="gym-modal-sub" id="gymModalDate"></div>
+    <div class="gym-type-btns">
+      <button class="gym-type-btn" onclick="selectGymType('Push')">Push</button>
+      <button class="gym-type-btn" onclick="selectGymType('Pull')">Pull</button>
+      <button class="gym-type-btn" onclick="selectGymType('Legs')">Legs</button>
+    </div>
+    <button class="modal-btn danger" onclick="recordNoGym()" style="margin-bottom:8px;">✕ Didn't Go</button>
+    <button class="modal-btn" onclick="closeGymModal()">Cancel</button>
   </div>
 </div>
 
@@ -460,8 +594,11 @@ const DEFAULT_CONFIG = {
 // ── State ──
 let config = JSON.parse(localStorage.getItem('ol_config')) || DEFAULT_CONFIG;
 let data = JSON.parse(localStorage.getItem('ol_data')) || {};  // { "Push": [ { date, exercises: { "Bench Press": [{w,r},...] } }, ... ] }
+let gymData = JSON.parse(localStorage.getItem('ol_gym')) || {};  // { "YYYY-MM-DD": { went: bool, type?: "Push"|"Pull"|"Legs" } }
 let currentDay = Object.keys(config)[0];
 let currentView = 'track';
+let gymWeekOffset = 0;  // 0 = current week, -1 = last week, etc.
+let pendingGymDate = null;
 
 // ── Init ──
 function init() {
@@ -475,16 +612,31 @@ function renderTabs() {
   el.innerHTML = Object.keys(config).map(day =>
     `<button class="tab ${day === currentDay ? 'active' : ''}" onclick="selectDay('${day}')">${day}</button>`
   ).join('');
+  el.innerHTML += `<button class="tab ${'gym' === currentDay ? 'active' : ''}" onclick="selectDay('gym')">Gym</button>`;
 }
 
 function selectDay(day) {
   currentDay = day;
+  const isGym = day === 'gym';
+  document.querySelector('.view-toggle').classList.toggle('hidden', isGym);
+  document.querySelector('.save-bar').classList.toggle('hidden', isGym || currentView !== 'track');
+  document.getElementById('gymView').classList.toggle('hidden', !isGym);
+  if (!isGym) {
+    document.getElementById('trackView').classList.toggle('hidden', currentView !== 'track');
+    document.getElementById('progressView').classList.toggle('hidden', currentView !== 'progress');
+    document.getElementById('historyView').classList.toggle('hidden', currentView !== 'history');
+  } else {
+    document.getElementById('trackView').classList.add('hidden');
+    document.getElementById('progressView').classList.add('hidden');
+    document.getElementById('historyView').classList.add('hidden');
+  }
   renderTabs();
   renderView();
 }
 
 // ── Views ──
 function setView(view) {
+  if (currentDay === 'gym') return;
   currentView = view;
   document.querySelectorAll('.view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   document.getElementById('trackView').classList.toggle('hidden', view !== 'track');
@@ -495,7 +647,8 @@ function setView(view) {
 }
 
 function renderView() {
-  if (currentView === 'track') renderTrack();
+  if (currentDay === 'gym') renderGym();
+  else if (currentView === 'track') renderTrack();
   else if (currentView === 'progress') renderProgress();
   else renderHistory();
 }
@@ -857,6 +1010,110 @@ function toast(msg) {
   el.textContent = msg;
   el.classList.add('show');
   setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+// ── GYM TRACKER ──
+function getWeekDates(offset) {
+  const now = new Date();
+  const day = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  const diffToMon = (day === 0 ? -6 : 1 - day);
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + diffToMon + offset * 7);
+  monday.setHours(0, 0, 0, 0);
+  return Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    return d;
+  });
+}
+
+function dateStr(d) {
+  return d.toISOString().split('T')[0];
+}
+
+function renderGym() {
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const todayStr = dateStr(new Date());
+  const weekDates = getWeekDates(gymWeekOffset);
+  const weekLabel = weekDates[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    + ' – ' + weekDates[5].toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  const cardsHTML = weekDates.map((d, i) => {
+    const ds = dateStr(d);
+    const entry = gymData[ds];
+    const isFuture = ds > todayStr;
+    const isToday = ds === todayStr;
+    let stateClass = '';
+    let statusHTML = '';
+
+    if (entry === undefined) {
+      stateClass = isFuture ? 'future' : '';
+      statusHTML = `<div class="gym-unchecked"></div>`;
+    } else if (entry.went) {
+      stateClass = 'went';
+      statusHTML = `<span class="gym-type-badge">${entry.type}</span>`;
+    } else {
+      stateClass = 'missed';
+      statusHTML = `<span class="gym-missed-badge">Rest</span>`;
+    }
+
+    if (isToday) stateClass += ' today';
+
+    const clickAttr = (!isFuture) ? `onclick="openGymModal('${ds}')"` : '';
+    return `
+      <div class="gym-day-card ${stateClass}" ${clickAttr}>
+        <div class="gym-day-info">
+          <span class="gym-day-name">${days[i]}</span>
+          <span class="gym-day-date">${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+        </div>
+        <div class="gym-day-status">${statusHTML}</div>
+      </div>`;
+  }).join('');
+
+  const canGoForward = gymWeekOffset < 0;
+  document.getElementById('gymView').innerHTML = `
+    <div class="gym-week-nav">
+      <button class="gym-nav-btn" onclick="gymNav(-1)">&#8249;</button>
+      <span class="gym-week-label">${weekLabel}</span>
+      <button class="gym-nav-btn" onclick="gymNav(1)" ${!canGoForward ? 'disabled style="opacity:0.3;pointer-events:none;"' : ''}>&#8250;</button>
+    </div>
+    <div class="gym-grid">${cardsHTML}</div>`;
+}
+
+function gymNav(dir) {
+  gymWeekOffset += dir;
+  renderGym();
+}
+
+function openGymModal(ds) {
+  pendingGymDate = ds;
+  const d = new Date(ds + 'T00:00:00');
+  document.getElementById('gymModalDate').textContent =
+    d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  document.getElementById('gymDayModal').classList.add('open');
+}
+
+function closeGymModal() {
+  document.getElementById('gymDayModal').classList.remove('open');
+  pendingGymDate = null;
+}
+
+function selectGymType(type) {
+  if (!pendingGymDate) return;
+  gymData[pendingGymDate] = { went: true, type };
+  localStorage.setItem('ol_gym', JSON.stringify(gymData));
+  closeGymModal();
+  renderGym();
+  toast(`${type} day logged ✓`);
+}
+
+function recordNoGym() {
+  if (!pendingGymDate) return;
+  gymData[pendingGymDate] = { went: false };
+  localStorage.setItem('ol_gym', JSON.stringify(gymData));
+  closeGymModal();
+  renderGym();
+  toast('Rest day recorded');
 }
 
 // ── Go ──
