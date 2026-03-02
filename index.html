@@ -31,7 +31,7 @@ body {
   min-height: 100dvh;
   max-width: 480px;
   margin: 0 auto;
-  padding: 0 16px 100px;
+  padding: 0 16px 140px;
   overflow-x: hidden;
 }
 
@@ -219,7 +219,7 @@ body {
 }
 .add-set-btn:active { border-color: var(--accent); color: var(--accent); }
 
-/* Save button */
+/* Save buttons bar */
 .save-bar {
   position: fixed;
   bottom: 0;
@@ -231,15 +231,39 @@ body {
   display: flex;
   justify-content: center;
 }
-.save-btn {
+.save-bar-inner {
   width: 100%;
   max-width: 448px;
+  display: flex;
+  gap: 10px;
+}
+.save-progress-btn {
+  flex: 1;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: 'Outfit', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: -0.3px;
+}
+.save-progress-btn:active { transform: scale(0.97); background: var(--surface2); }
+.save-progress-btn.has-draft {
+  border-color: var(--orange);
+  color: var(--orange);
+}
+.save-btn {
+  flex: 1;
   padding: 16px;
   border-radius: 14px;
   background: var(--accent);
   color: var(--bg);
   font-family: 'Outfit', sans-serif;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   border: none;
   cursor: pointer;
@@ -248,6 +272,33 @@ body {
 }
 .save-btn:active { transform: scale(0.97); background: var(--accent2); }
 .save-btn:disabled { opacity: 0.3; }
+
+/* Draft indicator banner */
+.draft-banner {
+  background: rgba(251, 146, 60, 0.12);
+  border: 1px solid rgba(251, 146, 60, 0.3);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: var(--orange);
+  font-weight: 600;
+}
+.draft-banner .discard-draft {
+  background: none;
+  border: none;
+  color: var(--text2);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-family: 'Outfit', sans-serif;
+  font-weight: 600;
+}
+.draft-banner .discard-draft:active { color: var(--red); }
 
 /* Chart */
 .chart-container {
@@ -527,9 +578,13 @@ body {
 
 <!-- TRACK VIEW -->
 <div id="trackView">
+  <div id="draftBanner"></div>
   <div id="exerciseCards"></div>
   <div class="save-bar">
-    <button class="save-btn" onclick="saveWorkout()">Save Workout</button>
+    <div class="save-bar-inner">
+      <button class="save-progress-btn" id="saveProgressBtn" onclick="saveDraft()">💾 Save Progress</button>
+      <button class="save-btn" onclick="saveDay()">✓ Save Day</button>
+    </div>
   </div>
 </div>
 
@@ -593,17 +648,34 @@ const DEFAULT_CONFIG = {
 
 // ── State ──
 let config = JSON.parse(localStorage.getItem('ol_config')) || DEFAULT_CONFIG;
-let data = JSON.parse(localStorage.getItem('ol_data')) || {};  // { "Push": [ { date, exercises: { "Bench Press": [{w,r},...] } }, ... ] }
-let gymData = JSON.parse(localStorage.getItem('ol_gym')) || {};  // { "YYYY-MM-DD": { went: bool, type?: "Push"|"Pull"|"Legs" } }
+let data = JSON.parse(localStorage.getItem('ol_data')) || {};
+let gymData = JSON.parse(localStorage.getItem('ol_gym')) || {};
+// Draft storage: keyed by day name, holds temp workout data for today
+// Format: { "Push": { date: "2025-01-15", exercises: { "Bench Press": [{w,r},...] } }, ... }
+let drafts = JSON.parse(localStorage.getItem('ol_drafts')) || {};
 let currentDay = Object.keys(config)[0];
 let currentView = 'track';
-let gymWeekOffset = 0;  // 0 = current week, -1 = last week, etc.
+let gymWeekOffset = 0;
 let pendingGymDate = null;
 
 // ── Init ──
 function init() {
+  cleanOldDrafts();
   renderTabs();
   renderView();
+}
+
+// Clean drafts from previous days (auto-expire)
+function cleanOldDrafts() {
+  const today = new Date().toISOString().split('T')[0];
+  let changed = false;
+  Object.keys(drafts).forEach(day => {
+    if (drafts[day].date !== today) {
+      delete drafts[day];
+      changed = true;
+    }
+  });
+  if (changed) localStorage.setItem('ol_drafts', JSON.stringify(drafts));
 }
 
 // ── Tabs ──
@@ -653,17 +725,39 @@ function renderView() {
   else renderHistory();
 }
 
+// ── Check if draft exists for current day ──
+function hasDraft() {
+  const today = new Date().toISOString().split('T')[0];
+  return drafts[currentDay] && drafts[currentDay].date === today;
+}
+
 // ── TRACK VIEW ──
 function renderTrack() {
   const exercises = config[currentDay] || [];
   const dayData = data[currentDay] || [];
   const last = dayData[dayData.length - 1];
+  const draft = hasDraft() ? drafts[currentDay] : null;
+
+  // Show draft banner if there's a saved draft
+  const bannerEl = document.getElementById('draftBanner');
+  if (draft) {
+    bannerEl.innerHTML = `
+      <div class="draft-banner">
+        <span>⏳ Unsaved progress from today</span>
+        <button class="discard-draft" onclick="discardDraft()">Discard</button>
+      </div>`;
+    document.getElementById('saveProgressBtn').classList.add('has-draft');
+  } else {
+    bannerEl.innerHTML = '';
+    document.getElementById('saveProgressBtn').classList.remove('has-draft');
+  }
 
   document.getElementById('exerciseCards').innerHTML = exercises.map((ex, ei) => {
     const lastSets = last?.exercises?.[ex];
+    const draftSets = draft?.exercises?.[ex];
     const lastInfo = lastSets ? `Last: ${lastSets.map(s => s.w + '×' + s.r).join(', ')}` : 'No history';
-    // Default 3 sets
-    const numSets = 3;
+    // Use draft sets count, or default 3
+    const numSets = draftSets ? Math.max(draftSets.length, 3) : 3;
     return `
       <div class="card" id="card-${ei}">
         <div class="card-title">
@@ -671,7 +765,7 @@ function renderTrack() {
           <span class="last-weight">${lastInfo}</span>
         </div>
         <div class="sets-container" id="sets-${ei}">
-          ${Array.from({length: numSets}, (_, si) => setRowHTML(ei, si, lastSets?.[si])).join('')}
+          ${Array.from({length: numSets}, (_, si) => setRowHTML(ei, si, lastSets?.[si], draftSets?.[si])).join('')}
         </div>
         <button class="add-set-btn" onclick="addSet(${ei})">+ Add Set</button>
       </div>
@@ -679,19 +773,22 @@ function renderTrack() {
   }).join('');
 }
 
-function setRowHTML(ei, si, prev) {
+function setRowHTML(ei, si, prev, draftSet) {
   const pw = prev ? prev.w : '';
   const pr = prev ? prev.r : '';
+  // If there's draft data, fill the inputs with actual values
+  const dw = draftSet ? draftSet.w : '';
+  const dr = draftSet ? draftSet.r : '';
   return `
     <div class="set-row" data-ei="${ei}" data-si="${si}">
       <span class="set-label">${si + 1}</span>
       <div class="input-group">
         ${si === 0 ? '<span class="input-label">Weight</span>' : ''}
-        <input class="set-input weight-input" type="number" inputmode="decimal" placeholder="${pw || '—'}" step="any">
+        <input class="set-input weight-input" type="number" inputmode="decimal" placeholder="${pw || '—'}" ${dw !== '' ? `value="${dw}"` : ''} step="any">
       </div>
       <div class="input-group">
         ${si === 0 ? '<span class="input-label">Reps</span>' : ''}
-        <input class="set-input reps-input" type="number" inputmode="numeric" placeholder="${pr || '—'}" step="1">
+        <input class="set-input reps-input" type="number" inputmode="numeric" placeholder="${pr || '—'}" ${dr !== '' ? `value="${dr}"` : ''} step="1">
       </div>
       <button class="remove-set" onclick="removeSet(this)">×</button>
     </div>
@@ -701,7 +798,7 @@ function setRowHTML(ei, si, prev) {
 function addSet(ei) {
   const container = document.getElementById(`sets-${ei}`);
   const count = container.querySelectorAll('.set-row').length;
-  container.insertAdjacentHTML('beforeend', setRowHTML(ei, count, null));
+  container.insertAdjacentHTML('beforeend', setRowHTML(ei, count, null, null));
 }
 
 function removeSet(btn) {
@@ -709,15 +806,14 @@ function removeSet(btn) {
   const container = row.parentElement;
   if (container.querySelectorAll('.set-row').length > 1) {
     row.remove();
-    // Re-number
     container.querySelectorAll('.set-row').forEach((r, i) => {
       r.querySelector('.set-label').textContent = i + 1;
     });
   }
 }
 
-// ── SAVE ──
-function saveWorkout() {
+// ── Gather current form data ──
+function gatherFormData() {
   const exercises = config[currentDay] || [];
   const entry = { date: new Date().toISOString().split('T')[0], exercises: {} };
   let hasData = false;
@@ -738,11 +834,49 @@ function saveWorkout() {
     if (sets.length) entry.exercises[ex] = sets;
   });
 
+  return { entry, hasData };
+}
+
+// ── SAVE DRAFT (temporary, survives page reload) ──
+function saveDraft() {
+  const { entry, hasData } = gatherFormData();
+  if (!hasData) { toast('Enter at least one set'); return; }
+
+  drafts[currentDay] = entry;
+  localStorage.setItem('ol_drafts', JSON.stringify(drafts));
+  toast('Progress saved 💾');
+  // Update the banner
+  document.getElementById('saveProgressBtn').classList.add('has-draft');
+  const bannerEl = document.getElementById('draftBanner');
+  bannerEl.innerHTML = `
+    <div class="draft-banner">
+      <span>⏳ Unsaved progress from today</span>
+      <button class="discard-draft" onclick="discardDraft()">Discard</button>
+    </div>`;
+}
+
+// ── DISCARD DRAFT ──
+function discardDraft() {
+  if (!confirm('Discard saved progress?')) return;
+  delete drafts[currentDay];
+  localStorage.setItem('ol_drafts', JSON.stringify(drafts));
+  toast('Draft discarded');
+  renderTrack();
+}
+
+// ── SAVE DAY (permanent, commits to history) ──
+function saveDay() {
+  const { entry, hasData } = gatherFormData();
   if (!hasData) { toast('Enter at least one set'); return; }
 
   if (!data[currentDay]) data[currentDay] = [];
   data[currentDay].push(entry);
   localStorage.setItem('ol_data', JSON.stringify(data));
+
+  // Clear the draft for this day since it's now saved permanently
+  delete drafts[currentDay];
+  localStorage.setItem('ol_drafts', JSON.stringify(drafts));
+
   toast('Workout saved ✓');
   renderTrack();
 }
@@ -780,7 +914,6 @@ function renderProgress() {
     `;
   }).join('');
 
-  // Render charts
   exercises.forEach(ex => {
     const points = dayData.filter(d => d.exercises[ex]).map(d => {
       const sets = d.exercises[ex];
@@ -853,7 +986,6 @@ function renderHistory() {
     return;
   }
 
-  // Find all-time PRs per exercise
   const prs = {};
   dayData.forEach(d => {
     Object.entries(d.exercises).forEach(([ex, sets]) => {
@@ -925,7 +1057,7 @@ function importCSV(event) {
   const reader = new FileReader();
   reader.onload = (e) => {
     try {
-      const lines = e.target.result.trim().split('\n').slice(1); // skip header
+      const lines = e.target.result.trim().split('\n').slice(1);
       const imported = {};
       lines.forEach(line => {
         const parts = line.match(/(".*?"|[^",]+)/g)?.map(s => s.replace(/"/g, '').trim());
@@ -937,11 +1069,9 @@ function importCSV(event) {
         imported[day][date][ex].push({ w: parseFloat(w), r: parseInt(r) });
       });
 
-      // Convert to our format
       Object.entries(imported).forEach(([day, dates]) => {
         if (!data[day]) data[day] = [];
         Object.entries(dates).forEach(([date, exercises]) => {
-          // Skip if we already have this exact date
           if (!data[day].find(d => d.date === date)) {
             data[day].push({ date, exercises });
           }
@@ -990,7 +1120,9 @@ function closeSettings() { document.getElementById('settingsModal').classList.re
 function confirmClear() {
   if (confirm('Delete ALL workout data? This cannot be undone.')) {
     data = {};
+    drafts = {};
     localStorage.removeItem('ol_data');
+    localStorage.removeItem('ol_drafts');
     closeSettings();
     renderView();
     toast('All data cleared');
@@ -1015,7 +1147,7 @@ function toast(msg) {
 // ── GYM TRACKER ──
 function getWeekDates(offset) {
   const now = new Date();
-  const day = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  const day = now.getDay();
   const diffToMon = (day === 0 ? -6 : 1 - day);
   const monday = new Date(now);
   monday.setDate(now.getDate() + diffToMon + offset * 7);
